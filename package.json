@@ -1,0 +1,28 @@
+{
+  "name": "tfcolsocial",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node index.js",
+    "dev": "nodemon --exec npm start"
+  },
+  "keywords": [],
+  "author": "Chiranjeeb Sengupta",
+  "license": "ISC",
+  "dependencies": {
+    "bcrypt": "^5.1.0",
+    "body-parser": "^1.20.2",
+    "express": "^4.18.2",
+    "express-validator": "^7.0.1",
+    "https": "^1.0.0",
+    "jsonwebtoken": "^9.0.0",
+    "pg": "^8.11.0",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^4.6.3"
+  },
+  "devDependencies": {
+    "nodemon": "^2.0.22"
+  }
+}

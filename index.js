@@ -9,6 +9,7 @@ const courseRoutes = require('./src/Course');
 const optRoutes = require('./src/Option');
 const roomsRoutes = require('./src/Rooms');
 const topicRoutes = require('./src/Topic');
+const subjectRoutes = require('./src/Subject');
 const app = express();
 const port = 4000;
 
@@ -40,6 +41,7 @@ app.use('/', courseRoutes);
 app.use('/', optRoutes);
 app.use('/', roomsRoutes);
 app.use('/', topicRoutes);
+app.use('/', subjectRoutes);
 
 // Start the server
 

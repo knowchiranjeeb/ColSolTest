@@ -1,5 +1,6 @@
 // Required Dependencies
-// const https = require('https');
+const https = require('https');
+const fs = require('fs');
 const express = require('express');
 const bodyParser = require('body-parser');
 const swaggerUI = require('swagger-ui-express');
@@ -13,8 +14,21 @@ const subjectRoutes = require('./src/Subject');
 const app = express();
 const port = 4000;
 
+
+const certificate = fs.readFileSync('./security/cert.pem', 'utf8');
+const privatekey = fs.readFileSync('./security/cert.key', 'utf8');
+
+// Create the credentials object
+const credentials = {
+  key: privatekey,
+  cert: certificate,
+};
+
+const server = https.createServer(credentials, app);
+
 // Middleware
 app.use(bodyParser.json());
+
 
 const options = {
     definition: {
@@ -26,7 +40,7 @@ const options = {
         contact: {
           name: "Chiranjeeb Sengupta",
         },
-        servers: ["http:*localhost:4000"],
+        servers: ["https:*localhost:4000"],
       },
     },    
     apis: ["./src/*.js"],
@@ -45,6 +59,6 @@ app.use('/', subjectRoutes);
 
 // Start the server
 
-app.listen(port, () => {
+server.listen(port, () => {
   console.log(`Server is running on port ${port}`);
 });

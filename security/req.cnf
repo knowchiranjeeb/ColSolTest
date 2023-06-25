@@ -8,12 +8,12 @@ ST = Delhi
 L = Delhi
 O = Knowforth Tech LLP
 OU = IT 
-CN = www.localhost.com
+CN = www.orca-app-czm5x.ondigitalocean.app
 [v3_req]
 keyUsage = critical, digitalSignature, keyAgreement
 extendedKeyUsage = serverAuth
 subjectAltName = @alt_names
 [alt_names]
-DNS.1 = www.localhost.com
-DNS.2 = localhost.com
-DNS.3 = localhost
+DNS.1 = www.orca-app-czm5x.ondigitalocean.app
+DNS.2 = orca-app-czm5x.ondigitalocean.app
+DNS.3 = orca-app-czm5x.ondigitalocean

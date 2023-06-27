@@ -2,6 +2,7 @@
 //const https = require('https');
 //const fs = require('fs');
 const express = require('express');
+const cors = require('cors');
 const bodyParser = require('body-parser');
 const swaggerUI = require('swagger-ui-express');
 const swaggerJsDoc = require('swagger-jsdoc');
@@ -27,6 +28,7 @@ const port = 4000;
 //const server = https.createServer(credentials, app);
 
 // Middleware
+app.use(cors());
 app.use(bodyParser.json());
 
 
@@ -50,6 +52,12 @@ const options = {
   app.use("/api-docs", swaggerUI.serve, swaggerUI.setup(specs));
 
 // API endpoints
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  next();
+});
 app.use('/', collegeRoutes);
 app.use('/', courseRoutes);
 app.use('/', optRoutes);

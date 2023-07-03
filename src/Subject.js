@@ -139,7 +139,7 @@ router.post('/api/subjects', authenticateToken, async (req, res) => {
 
 /**
  * @swagger
- * /api/subjects/{id}:
+ * /api/subjects/{SubjectID}:
  *   put:
  *     security:
  *       - BasicAuth: []
@@ -166,7 +166,7 @@ router.post('/api/subjects', authenticateToken, async (req, res) => {
  *       '500':
  *         description: An error occurred while updating the subject
  */
-router.put('/api/subjects/:id', authenticateToken, async (req, res) => {
+router.put('/api/subjects/:SubjectID', authenticateToken, async (req, res) => {
     try {
         const SubjectID = parseInt(req.params.SubjectID);
         const { SubjectName, CourseID } = req.body;

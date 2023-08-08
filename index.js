@@ -32,7 +32,7 @@ const adjustRoutes = require('./src/Adjustments');
 const repRoutes = require('./src/Reports');
 const cors = require('cors');
 const app = express();
-const port = 8000;
+const port = 7050;
 
 
 //const certificate = fs.readFileSync('./security/cert.pem', 'utf8');

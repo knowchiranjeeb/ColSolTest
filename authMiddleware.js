@@ -7,8 +7,8 @@ const basicAuth = (req, res, next) => {
   if (credentials) {
     result = Buffer.from(credentials, 'base64').toString('utf-8');
   }
-  
-  if (!credentials || result !== 'csg:csg123') {
+  const auth = process.env.AUTH_USER+":"+process.env.AUTH_PASS;
+  if (!credentials || result !== auth) {
     res.setHeader('WWW-Authenticate', 'Basic realm="API Authentication"');
     res.sendStatus(401);
     return;

@@ -2,18 +2,37 @@
 //const https = require('https');
 //const fs = require('fs');
 const express = require('express');
-const cors = require('cors');
 const bodyParser = require('body-parser');
 const swaggerUI = require('swagger-ui-express');
 const swaggerJsDoc = require('swagger-jsdoc');
-const collegeRoutes = require('./src/College');
-const courseRoutes = require('./src/Course');
-const optRoutes = require('./src/Option');
-const roomsRoutes = require('./src/Rooms');
-const topicRoutes = require('./src/Topic');
-const subjectRoutes = require('./src/Subject');
+const regRoutes = require('./src/Register');
+const btypeRoutes = require('./src/BusinessType');
+const indtypeRoutes = require('./src/IndustryType');
+const fiscalRoutes = require('./src/FiscalYear');
+const curRoutes = require('./src/Currency');
+const curConvRoutes = require('./src/CurrencyConv');
+const contRoutes = require('./src/Country');
+const langRoutes = require('./src/Language');
+const datformatRoutes = require('./src/DateFormat');
+const payTermRoutes = require('./src/PayTerm');
+const salRoutes = require('./src/Salutation');
+const unitRoutes = require('./src/Units');
+const taxPrefRoutes = require('./src/TaxPref');
+const stateRoutes = require('./src/State');
+const gsttreatRoutes = require('./src/GSTTreatment');
+const compRoutes = require('./src/Company');
+const custRoutes = require('./src/Customer');
+const payModeRoutes = require('./src/PayMode');
+const itemRoutes = require('./src/Items');
+const hsnRoutes = require('./src/HSNCode');
+const userRoutes = require('./src/Users');
+const invRoutes = require('./src/Invoice');
+const payRoutes = require('./src/Payments');
+const adjustRoutes = require('./src/Adjustments');
+const repRoutes = require('./src/Reports');
+const cors = require('cors');
 const app = express();
-const port = 4000;
+const port = 8000;
 
 
 //const certificate = fs.readFileSync('./security/cert.pem', 'utf8');
@@ -27,8 +46,9 @@ const port = 4000;
 
 //const server = https.createServer(credentials, app);
 
-// Middleware
 app.use(cors());
+
+// Middleware
 app.use(bodyParser.json());
 
 
@@ -36,13 +56,13 @@ const options = {
     definition: {
       openapi: "3.0.0",
       info: {
-        title: "KF College Social API",
+        title: "KF Invoice API",
         version: "1.0.0",
-        description: "KF College Social API",
+        description: "KF Invoice API",
         contact: {
           name: "Chiranjeeb Sengupta",
         },
-        servers: ["https:*localhost:4000"],
+        servers: ["https:*localhost:5000"],
       },
     },    
     apis: ["./src/*.js"],
@@ -51,19 +71,33 @@ const options = {
   const specs = swaggerJsDoc(options);
   app.use("/api-docs", swaggerUI.serve, swaggerUI.setup(specs));
 
-// API endpoints
-app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  next();
-});
-app.use('/', collegeRoutes);
-app.use('/', courseRoutes);
-app.use('/', optRoutes);
-app.use('/', roomsRoutes);
-app.use('/', topicRoutes);
-app.use('/', subjectRoutes);
+
+  // API endpoints
+app.use('/', regRoutes);
+app.use('/', btypeRoutes);
+app.use('/', indtypeRoutes);
+app.use('/', fiscalRoutes);
+app.use('/', curRoutes);
+app.use('/', curConvRoutes);
+app.use('/', contRoutes);
+app.use('/', langRoutes);
+app.use('/', datformatRoutes);
+app.use('/', payTermRoutes);
+app.use('/', salRoutes);
+app.use('/', unitRoutes);
+app.use('/', taxPrefRoutes);
+app.use('/', stateRoutes);
+app.use('/', gsttreatRoutes);
+app.use('/', compRoutes);
+app.use('/', custRoutes);
+app.use('/', userRoutes);
+app.use('/', itemRoutes);
+app.use('/', hsnRoutes);
+app.use('/', payModeRoutes);
+app.use('/', invRoutes);
+app.use('/', payRoutes);
+app.use('/', adjustRoutes);
+app.use('/', repRoutes);
 
 // Start the server
 

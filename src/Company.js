@@ -3,8 +3,10 @@ const router = express.Router();
 const pool = require('../db');
 const multer = require('multer');
 const path = require('path');
+const sharp = require('sharp');
 const authenticateToken = require('../authMiddleware');
-const { writeToUserLog, savePicture, fetchPicture, deleteFilesInFolder } = require('./common');
+const { writeToUserLog, deleteTempFiles, getPicFromUploads, savePicToUploads } = require('./common');
+
 
 const upload = multer({ dest: 'uploads/' });
 
@@ -14,6 +16,84 @@ const upload = multer({ dest: 'uploads/' });
  *   name: Company
  *   description: API endpoints for Company
  */
+
+/**
+ * @swagger
+ * /api/GetCompanyLogo/{compid}:
+ *   get:
+ *     summary: Get user profile picture from the Users table based on the userid
+ *     tags: [Company]
+ *     security:
+ *       - basicAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: compid
+ *         schema:
+ *           type: integer
+ *         required: true
+ *         description: Company ID
+ *     responses:
+ *       '200':
+ *         description: Successful operation. Returns the company's logo as a jpg image.
+ *         content:
+ *           image/jpeg:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *       '400':
+ *         description: Invalid request or missing parameters.
+ *       '404':
+ *         description: Company not found.
+ *       '408':
+ *         description: No logo available for the company.
+ */
+router.get('/api/GetCompanyLogo/:compid', authenticateToken, async (req, res) => {
+  const { compid } = req.params;
+
+  if (!compid) {
+    return res.status(400).json({ error: 'Invalid request or missing parameters' });
+  }
+
+  try {
+
+    const folderPath = 'uploads';
+    deleteTempFiles(folderPath);
+
+    const query = 'SELECT logo FROM "Company" WHERE compid = $1';
+    const { rows } = await pool.query(query, [compid]);
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Company not found' });
+    }
+
+    company = rows[0];
+    const pictureData = company.logo;
+
+    if (pictureData === null) {
+      return res.status(408).send('No logo available for the company.');
+    }
+
+    const picturePath = await savePicToUploads(compid, pictureData, "Company");
+
+    if (picturePath === null) {
+      res.status(405).json({ error: 'Logo not found' });
+    }
+    else
+    {
+      const picData = await getPicFromUploads(compid,"Company");
+      if (picData === null) {
+        res.status(404).json({ error: 'Logo not found' });
+      } else {
+        res.contentType('image/jpeg'); 
+        res.end(picData); 
+      }
+    }
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 
 /**
  * @swagger
@@ -34,23 +114,48 @@ const upload = multer({ dest: 'uploads/' });
  *       200:
  *         description: Returns the company details
  *         content:
- *           '*':
- *            schema:
- *               type: object
- *               properties:
- *                 logo:
- *                   type: string
- *                   format: binary 
+ *           compname:
+ *             type: string
+ *           isgstreg:
+ *             type: boolean
+ *           gstno:
+ *             type: string
+ *           indtypeid:
+ *             type: integer
+ *           bustypeid:
+ *             type: integer
+ *           countryid:
+ *             type: integer
+ *           stateid:
+ *             type: integer
+ *           street1:
+ *             type: string
+ *           street2:
+ *             type: string
+ *           city:
+ *             type: string
+ *           pincode:
+ *             type: string
+ *           phone:
+ *             type: string
+ *           email:
+ *             type: string
+ *           website:
+ *             type: string
+ *           fiscal:
+ *             type: integer
+ *           language:
+ *             type: string
+ *           dateformatid:
+ *             type: integer
+ *           panno:
+ *             type: string
+ *       400:
+ *         description: Invalid request or missing parameters
+ *       404:
+ *         description: Company Not Found
  *       500:
  *         description: Failed to fetch the company details.
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 error:
- *                   type: string
- *                   description: Error message.
  */
 router.get('/api/GetCompanyDetails/:compid', authenticateToken, async (req, res) => {
     const { compid } = req.params;
@@ -60,36 +165,11 @@ router.get('/api/GetCompanyDetails/:compid', authenticateToken, async (req, res)
     }
   
     try {
-      const query = 'SELECT compname, isgstreg, gstno, indtypeid, bustypeid, countryid, stateid, street1, street2, city, pincode, phone, email, website, fiscal, "language", dateformatid, panno, logofile FROM public."Company" WHERE compid = $1';
+      const query = 'SELECT compname, isgstreg, gstno, indtypeid, bustypeid, countryid, stateid, street1, street2, city, pincode, phone, email, website, fiscal, "language", dateformatid, panno, logo FROM public."Company" WHERE compid = $1';
       const result = await pool.query(query, [compid]);
   
       if (result.rows.length > 0) {
-        let picname = '/profilepic/demologo.jpg';
-        const company = result.rows[0]    
-        if (company.logofile != null && company.logofile.trim() != '') {
-          picname = company.logofile;
-        }
-        const { contentType, data } =  await fetchPicture(picname);
-
-        res.set('Content-Type', contentType);
-        res.set('compname', company.compname);
-        res.set('isgstreg', company.isgstreg);
-        res.set('gstno', company.gstno);
-        res.set('indtypeid', company.indtypeid);
-        res.set('bustypeid', company.bustypeid);
-        res.set('countryid', company.countryid);
-        res.set('street1', company.street1);
-        res.set('street2', company.street2);
-        res.set('city', company.city);
-        res.set('pincode', company.pincode);
-        res.set('phone', company.phone);
-        res.set('email', company.email);
-        res.set('website', company.website);
-        res.set('fiscal', company.fiscal);
-        res.set('language', company.language);
-        res.set('dateformatid', company.dateformatid);
-        res.set('panno', company.panno);
-        res.status(200).send(data);
+        return res.status(200).json(rows);
       }
       else {
         return res.status(404).json({ error: 'Company not found' });
@@ -217,18 +297,17 @@ router.put('/api/UpdComp', upload.single('logo'), authenticateToken, async (req,
 
   try {
   
+    const tempPath = req.file.path;
 
-    const extension = path.extname(req.file.originalname).toLowerCase();
-
-    const logofile = await savePicture(req.file, 'CL'+compid.toString()+extension);
-
+    const pictureData = await sharp(tempPath).resize(90, 90).toBuffer();
+    
     const updateQuery = `
       UPDATE "Company"
       SET
         compname = $2,
         isgstreg = $3,
         gstno = $4,
-        logofile = $5,
+        logo = $5,
         indtypeid = $6,
         bustypeid = $7,
         countryid = $8,
@@ -253,7 +332,7 @@ router.put('/api/UpdComp', upload.single('logo'), authenticateToken, async (req,
       compname,
       isgstreg,
       gstno,
-      logofile,
+      pictureData,
       indtypeid,
       bustypeid,
       countryid,
@@ -275,11 +354,6 @@ router.put('/api/UpdComp', upload.single('logo'), authenticateToken, async (req,
       return res.status(404).json({ error: 'Company not found' });
     }
 
-    console.log(upload.path);
-    //deleteFilesInFolder(upload.path)
-    //  .catch((err) => console.error(err));
-    
-
     writeToUserLog(userid,'Updated Company - '+compname,compid,isweb);
     return res.status(200).json({ message: 'Company details updated successfully' });
   } catch (err) {
@@ -287,5 +361,6 @@ router.put('/api/UpdComp', upload.single('logo'), authenticateToken, async (req,
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
+
 
 module.exports = router;  

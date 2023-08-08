@@ -3,7 +3,24 @@ const axios = require('axios');
 const pool = require('../db');
 const fs = require('fs');
 const path = require('path');
-const sharp = require('sharp');
+const util = require('util');
+
+const readdirAsync = util.promisify(fs.readdir);
+const unlinkAsync = util.promisify(fs.unlink);
+/*
+const emailHost = process.env.EMAIL_HOST;
+const emailUser = process.env.EMAIL_USER;
+const emailPass = process.env.EMAIL_PASSWORD;
+const smsSender = process.env.SMS_SENDER;
+const smsURL = process.env.SMS_URL;
+const smsAPI = process.env.SMS_API;
+*/
+const emailHost = 'smtp.hostinger.com';
+const emailUser = 'kfinvoice@knowforth.in';
+const emailPass = 'Kf!12345678';
+const smsSender = 'AMBONG';
+const smsURL = 'https://api.textlocal.in/send/?';
+const smsAPI = 'jCos0jGuAPE-PdFyiAqkxPoKFq7wzLSzqr9con60HH';
 
 // Function to generate an OTP of the specified number of digits
 function generateOTP(digits) {
@@ -41,27 +58,24 @@ async function writeToUserLog(userid, logaction, compid, isweb) {
  */
 async function sendEmail(emailTo, subject, text) {
   if (!emailTo || !subject || !text) {
-    console.log(emailTo);
-    console.log(subject);
-    console.log(text);
     throw new Error('Invalid request or missing parameters');
   }
 
   try {
     // Create a transporter object using SMTP transport method
     const transporter = nodemailer.createTransport({
-      host: 'smtp.hostinger.com', // Your SMTP server host
+      host: emailHost, // Your SMTP server host
       port: 465, // Your SMTP server port
       secure: true, // Use TLS (true for 465, false for other ports)
       auth: {
-        user: 'kfinvoice', // Your SMTP username
-        pass: 'Kf!12345678', // Your SMTP password
+        user: emailUser, // Your SMTP username
+        pass: emailPass, // Your SMTP password
       },
     });
 
     // Set up email data
     const mailOptions = {
-      from: 'kfinvoice@knowforth.in', // Sender's email address
+      from: emailUser, // Sender's email address
       to: emailTo, // Recipient's email address
       subject: subject, // Subject of the email
       text: text, // Plain text body of the email
@@ -91,14 +105,14 @@ async function sendEmail(emailTo, subject, text) {
  */
 async function sendSMS( message, numbers) {
   try {
-    const url = 'https://api.textlocal.in/send/';
-    const apiKey = 'jCos0jGuAPE-PdFyiAqkxPoKFq7wzLSzqr9con60HH';
-    const sender = '919999741939';
+    const url = smsURL;
+    const apiKey = smsAPI;
+    const sender = smsSender;
 
     const params = new URLSearchParams({
       apikey: apiKey,
-      sender: sender,
       message: message,
+      sender: sender,
       numbers: numbers,
     });
 
@@ -122,101 +136,68 @@ async function sendSMS( message, numbers) {
 //   .then((result) => console.log(result))
 //   .catch((err) => console.error(err.message));
 
-/**
- * Function to save a picture and return the URL of the saved picture.
- * @param {string} pictureFile - The picture file to save.
- * @returns {Promise<string>} - A Promise that resolves to the URL of the saved picture.
- * @throws {Error} - If there is an error saving the picture.
- */
-async function savePicture(pictureFile, picname) {
-  return new Promise(async (resolve, reject) => {
-    const tempPath = pictureFile.path;
-
-    const targetPath = path.join(__dirname, 'profilepic/', picname);
-
-    try {
-      // Resize the image to 90x90 pixels using sharp
-      await sharp(tempPath).resize(90, 90).toFile(targetPath);      
-
-      resolve(targetPath);
-    } catch (err) {
-      console.error(err);
-      reject(new Error('Failed to save and resize the picture'));
-    }
-  });
-}
-
-/**
- * Fetch the picture based on the picture path provided.
- * @param {string} picturePath - The path of the picture to fetch.
- * @returns {Promise<Buffer>} - A Promise that resolves to the picture data as a Buffer.
- * @throws {Error} - If there is an error reading the picture file.
- */
-function fetchPicture(picturepath) {
-  return new Promise((resolve, reject) => {
-
-    
-    const picPath = path.join(__dirname, picturepath);
-    fs.readFile(picPath, (err, data) => {
-      if (err) {
-        console.error(err);
-        reject(new Error('Failed to fetch the picture'));
-        return;
-      }
-
-      const extension = path.extname(picPath).toLowerCase();
-      let contentType = 'application/octet-stream'; // Default content type
-
-      // Determine the content type based on the image extension
-      if (extension === '.jpg' || extension === '.jpeg') {
-        contentType = 'image/jpeg';
-      } else if (extension === '.png') {
-        contentType = 'image/png';
-      } else if (extension === '.gif') {
-        contentType = 'image/gif';
-      } else if (extension === '.webp') {
-        contentType = 'image/webp';
-      }
-
-
-      resolve({ contentType, data }) ;
-
-    });
-  });
-}
-
-/**
- * Deletes all files in the specified folder.
- * @param {string} folderPath - The path of the folder to delete files from.
- * @returns {Promise<void>} - A promise that resolves when all files are deleted.
- */
-async function deleteFilesInFolder(folderPath) {
+// Function to delete files in a folder only if they are not busy or locked
+async function deleteTempFiles(folderPath) {
   try {
-    // Read the contents of the folder
-    const files = await fs.promises.readdir(folderPath);
-
-    // Loop through the files and delete each one
+    const files = await readdirAsync(folderPath);
     for (const file of files) {
-      const filePath = path.join(folderPath, file);
-
-      // Use fs.unlinkSync for synchronous deletion
-      // fs.unlink(filePath, (err) => {
-      //   if (err) throw err;
-      //   console.log(`${file} was deleted successfully`);
-      // });
-
-      // Use fs.promises.unlink for asynchronous deletion
-      await fs.promises.unlink(filePath);
-      console.log(`${file} was deleted successfully`);
+      const filePath = `${folderPath}/${file}`;
+      try {
+        await unlinkAsync(filePath);
+        console.log(`File ${file} deleted successfully.`);
+      } catch (error) {
+        if (error.code === 'EBUSY') {
+          console.log(`File ${file} is busy or locked. Skipping deletion.`);
+        } else {
+          console.error(`Error deleting file ${file}:`, error.message);
+        }
+      }
     }
-
-    console.log('All files in the folder have been deleted.');
-  } catch (err) {
-    console.error(err);
-    throw new Error('Failed to delete files in the folder');
+  } catch (error) {
+    console.error('Error reading folder:', error.message);
   }
 }
 
-// Example usage:
-  
-module.exports = { generateOTP, writeToUserLog, sendEmail, sendSMS, savePicture, fetchPicture, deleteFilesInFolder };
+// Function to save the  picture in the "uploads" folder
+async function savePicToUploads(id, picture, type) {
+  const folderPath = path.join(__dirname, 'uploads');
+  if (!fs.existsSync(folderPath)) {
+    fs.mkdirSync(folderPath);
+  }
+  let picturePath;
+  if (type === 'User')
+  {
+    picturePath = path.join(folderPath, `U${id}.jpg`);
+  }
+  else
+  {
+    picturePath = path.join(folderPath, `CL${id}.jpg`);
+  }
+  await util.promisify(fs.writeFile)(picturePath, picture);
+  return picturePath;
+}
+
+// Function to fetch the picture from the "uploads" folder
+async function getPicFromUploads(id, type) {
+  const folderPath = path.join(__dirname, 'uploads');
+  let picturePath;
+  if (type === 'User')
+  {
+    picturePath = path.join(folderPath, `U${id}.jpg`);
+  }
+  else
+  {
+    picturePath = path.join(folderPath, `CL${id}.jpg`);
+  }
+  try {
+    const pictureData = await util.promisify(fs.readFile)(picturePath);
+    return pictureData;
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return null; // Return null if the picture file does not exist
+    }
+    throw error;
+  }
+}
+
+module.exports = { generateOTP, writeToUserLog, sendEmail, sendSMS, deleteTempFiles, savePicToUploads, getPicFromUploads };

@@ -3,12 +3,13 @@ const router = express.Router();
 const pool = require('../db');
 const multer = require('multer');
 const path = require('path');
+const sharp = require('sharp');
 const authenticateToken = require('../authMiddleware');
-const { generateOTP, sendEmail, sendSMS, savePicture, fetchPicture, writeToUserLog } = require('./common');
+const { generateOTP, sendEmail, sendSMS, deleteTempFiles, getPicFromUploads, savePicToUploads } = require('./common');
 
 const upload = multer({ dest: 'uploads/' });
 
-const siteadd = 'http://www.supergst.com'
+const siteadd = 'https://orca-app-czm5x.ondigitalocean.app/'
 
 /**
  * @swagger
@@ -19,35 +20,35 @@ const siteadd = 'http://www.supergst.com'
 
 /**
  * @swagger
- * /api/CheckCred:
+ * /api/CheckCred/{userind}/{password}:
  *   get:
  *     summary: Check the Credential based on mobile number or email ID and Password
  *     tags: [Users]
  *     security:
  *       - basicAuth: []
- *     requestBody:
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               userind:
- *                 type: string
- *               password:
- *                 type: string
- *             required:
- *               - userind
- *               - password
+ *     parameters:
+ *       - in: path
+ *         name: userind
+ *         schema:
+ *           type: string
+ *         required: true
+ *         description: User Identification (Email or Mobile Number [Without country Code])
+ *       - in: path
+ *         name: password
+ *         schema:
+ *           type: string
+ *         required: true
+ *         description: User Password to Check
  *     responses:
  *       200:
- *         description: Returns the user ID if found
+ *         description: Returns the user ID if found and 0 if not found
  *       400:
  *         description: Invalid request or missing parameters
  *       500:
  *         description: Internal server error
  */
-router.get('/api/CheckCred', authenticateToken, async (req, res) => {
-  const { userind, password } = req.body;
+router.get('/api/CheckCred/:userind/:password', authenticateToken, async (req, res) => {
+  const { userind, password } = req.params;
 
   if (!userind || !password) {
     return res.status(400).json({ error: 'Invalid request or missing parameters' });
@@ -63,7 +64,7 @@ router.get('/api/CheckCred', authenticateToken, async (req, res) => {
     if (userid) {
       return res.status(200).json({ userid });
     } else {
-      return res.status(404).json('Invalid Credentails');
+      return res.status(201).json({userid : 0});
     }
   } catch (err) {
     console.error(err);
@@ -174,24 +175,30 @@ router.post('/api/SendEmailOTP', authenticateToken, async (req, res) => {
 
   try {
 
-    const query = 'SELECT userid, emailid as emailid1, fullname, emailotp FROM "Users" WHERE emailid = $1';
+    const query = 'SELECT userid, emailid as emailid1, fullname FROM "Users" WHERE emailid = $1';
 
     const { rows } = await pool.query(query, [emailid]);
     if (rows.length === 0) {
       return res.status(404).json({ error: 'Email ID not found' });
     }
 
-    const { userid, fullname, emailid1, emailotp } = rows[0];
-    const OTPLink = `${siteadd}api/VerifyOTP/email/${userid}/${emailotp}`;
-    const ret = sendEmail(emailid1,'Verify your Email ID for SuperGST Invoice Application','Hi '+fullname+', Thanks you for Registering with Super GST Invoice. Click on the link ' + OTPLink+' to verify your Email. Thanks SUPER GST Invoice. Happy Invoicing.')
-    let msg = ''
+    const eOTP = generateOTP(6);
+    
+    const updOTP = 'Update "Users" set emailotp=$1 where emailid = $2';
+
+    await pool.query(updOTP, [eOTP, emailid]);
+
+    const { userid, fullname, emailid1 } = rows[0];
+    const OTPLink = `${siteadd}api/VerifyOTP/email/${userid}/${eOTP}`;
+    const ret = sendEmail(emailid1,'Verify your Email ID for SuperGST Invoice Application','Hi '+fullname+', Thanks you for Registering with Super GST Invoice. Click on the link ' + OTPLink+' to verify your Email. Good Luck from SUPER GST Invoice Team. Happy Invoicing.');
+    let msg = '';
     if (ret === 'Email sent successfully') {
       msg='Please check your email - ' + emailid1 +' for a verification email'; 
     }
     else {
       msg='Please try later.Could not send a verification email to ' + emailid1 ; 
     }
-    return res.status(200).json({'Message': msg}) 
+    return res.status(200).json({'Message': msg}); 
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: 'Internal server error' });
@@ -234,26 +241,33 @@ router.post('/api/SendMobileOTP', authenticateToken, async (req, res) => {
     return res.status(400).json({ error: 'Invalid request or missing parameters' });
   }
 
-  try {
-    const query = 'SELECT u.userid, u.fullname, u.mobileno as mobileno1, u.mobotp, co.isdcode FROM "Users" u, "Company" c,"Country" co WHERE u.compid=c.compid and c.countryid=co.countryid and u.mobileno = $1';
+  try {    
+    const query = 'SELECT u.userid, u.fullname, u.mobileno as mobileno1, co.isdcode FROM "Users" u, "Country" co WHERE u.countryid=co.countryid and u.mobileno = $1';
 
     const { rows } = await pool.query(query, [mobileno]);
     if (rows.length === 0) {
       return res.status(404).json({ error: 'Mobile Number not found' });
     }
 
-    const { userid, fullname, mobileno1, mobotp, isdcode } = rows[0];
-    const OTPLink = `${siteadd}api/VerifyOTP/mob/${userid}/${mobotp}`;
-    const mobno =  toString(mobotp).trim() + toString(mobileno1).trim()
-    const msg1 = 'Dear Customer, ' + mobotp + ' is your OTP from AmiBong.com Login. For security reasons, Do not share this OTP with anyone.'
-    //const msg1 = 'Hi '+fullname+', Thanks you for Registering with Super GST Invoice. Click on the link ' + OTPLink+' to verify your Mobile Number. Thanks from SUPER GST Invoice Team. Happy Invoicing.'
-    const ret = sendSMS(mobno,'Verify your Mobile Number for SuperGST Invoice Application',msg1)
+    const mOTP = generateOTP(6);
+    
+    const updOTP = 'Update "Users" set mobotp=$1 where mobileno = $2';
+
+    await pool.query(updOTP, [mOTP, mobileno]);
+
+    const { userid, fullname, mobileno1, isdcode } = rows[0];
+    const OTPLink = `${siteadd}api/VerifyOTP/mob/${userid}/${mOTP}`;
+    const mobno =  isdcode.toString().trim() + mobileno1.toString().trim();
+    //const msg1 = 'Dear Customer, ' + mOTP.toString() + ' is your OTP from AmiBong.com Login. For security reasons, Do not share this OTP with anyone.';
+    const msg1 = 'Dear Customer, ' + mOTP.toString() + ' is your OTP from AmiBong.com Login. For security reasons, Do not share this OTP with anyone.';
+    const ret = sendSMS(msg1, mobno);
     let msg = ''
+    console.log(ret);
     if (ret === 'SMS sent successfully') {
-      msg = 'Please check your mobile. An SMS has been send to mobile number ' + toString(mobileno1) +', for a mobile number verification'; 
+      msg = 'Please check your mobile. An SMS has been send to mobile number ' + mobileno1.toString() +', for a mobile number verification'; 
     }
     else {
-      msg = 'Please try later. Could not send a verification message to ' + toString(mobileno1) ; 
+      msg = 'Please try later. Could not send a verification message to ' + mobileno1.toString() ; 
     }
     return res.status(200).json({'Message': msg}) 
   } catch (err) {
@@ -266,7 +280,7 @@ router.post('/api/SendMobileOTP', authenticateToken, async (req, res) => {
 /**
  * @swagger
  * /api/VerifyOTP/{otpType}/{userid}/{otp}:
- *   post:
+ *   get:
  *     summary: Check OTP based on user ID, OTP, and OTP type (email or mobile)
  *     tags: [Users]
  *     parameters:
@@ -298,8 +312,8 @@ router.post('/api/SendMobileOTP', authenticateToken, async (req, res) => {
  *       500:
  *         description: Internal server error
  */
-router.post('/api/VerifyOTP/:otpType/:userid/:otp', async (req, res) => {
-  const { otpType, userid, otp } = req.body;
+router.get('/api/VerifyOTP/:otpType/:userid/:otp', async (req, res) => {
+  const { otpType, userid, otp } = req.params;
 
   if (!userid || !otp || !otpType) {
     return res.status(400).json({ error: 'Invalid request or missing parameters' });
@@ -328,7 +342,7 @@ router.post('/api/VerifyOTP/:otpType/:userid/:otp', async (req, res) => {
     const verField = otpType === 'email' ? emailid : mobileno;
 
     if (otp === otpField) {
-      const updateQuery = `UPDATE "Users" SET ${updateField} = true, ${lastverField} = ${verField} WHERE userid = $1`;
+      const updateQuery = `UPDATE "Users" SET ${updateField} = true, ${lastverField} = '${verField}' WHERE userid = $1`;
       await pool.query(updateQuery, [userid]);
       const msg = otpType === 'email' ? 'You email has been verified Successfully. Login to Super GST Invoice to continue.' : 'Your Mobile Number has been verified Successfully. Login to Super GST Invoice to continue.';
       return res.status(200).json({ Message: msg });
@@ -340,7 +354,6 @@ router.post('/api/VerifyOTP/:otpType/:userid/:otp', async (req, res) => {
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
-
 
 /**
  * @swagger
@@ -391,14 +404,14 @@ router.post('/api/UpdatePassword', authenticateToken, async (req, res) => {
 
 /**
  * @swagger
- * /api/GetUserDet:
+ * /api/GetUserDet/{userid}:
  *   get:
  *     summary: Get user details from the Users table based on the userid
  *     tags: [Users]
  *     security:
  *       - basicAuth: []
  *     parameters:
- *       - in: query
+ *       - in: path
  *         name: userid
  *         schema:
  *           type: integer
@@ -407,58 +420,75 @@ router.post('/api/UpdatePassword', authenticateToken, async (req, res) => {
  *     responses:
  *       200:
  *         description: Returns the user details
- *         content:
- *           '*':
- *            schema:
- *               type: object
- *               properties:
- *                 picture:
- *                   type: string
- *                   format: binary 
- *                 company:
- *                   type: string
- *                   description: The Company name.
- *                 salid:
- *                   type: integer
- *                   description: Salutation ID.
- *                 fullname:
- *                   type: string
- *                   description: The user's full name.
- *                 emailid:
- *                   type: string
- *                   description: The user's email id.
- *                 isemailverified:
- *                   type: boolean
- *                   description: Is the user's email id verified.
- *                 mobileno:
- *                   type: string
- *                   description: The user's mobile no.
- *                 ismobileverified:
- *                   type: boolean
- *                   description: Is the user's mobile no. verified.
- *                 usertype:
- *                   type: string
- *                   description: The user type.
+ *       400:
+ *         description: Invalid request or missing parameters
+ *       404:
+ *         description: User not found
  *       500:
- *         description: Failed to fetch the user details.
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 error:
- *                   type: string
- *                   description: Error message.
+ *         description: Internal server error
  */
-router.get('/api/GetUserDet', authenticateToken, async (req, res) => {
-  const { userid } = req.query;
+router.get('/api/GetUserDet/:userid', authenticateToken, async (req, res) => {
+  const { userid } = req.params;
 
   if (!userid) {
     return res.status(400).json({ error: 'Invalid request or missing parameters' });
   }
 
   try {
-    const query = 'SELECT company, salid, fullname, emailid, emailverified as isemailverified, mobileno, mobileverified as ismobileverified, usertype, picture FROM "Users" WHERE userid = $1';
+    const query = 'SELECT company, salid, fullname, emailid, emailverified as isemailverified, mobileno, mobileverified as ismobileverified, usertype FROM "Users" WHERE userid = $1';
+    const { rows } = await pool.query(query, [userid]);
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    return res.status(200).json(rows);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * @swagger
+ * /api/GetUserPicture/{userid}:
+ *   get:
+ *     summary: Get user profile picture from the Users table based on the userid
+ *     tags: [Users]
+ *     security:
+ *       - basicAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: userid
+ *         schema:
+ *           type: integer
+ *         required: true
+ *         description: User ID
+ *     responses:
+ *       '200':
+ *         description: Successful operation. Returns the user's profile picture as a jpg image.
+ *         content:
+ *           image/jpeg:
+ *             schema:
+ *               type: string
+ *               format: binary
+ *       '404':
+ *         description: User profile picture not found.
+ */
+router.get('/api/GetUserPicture/:userid', authenticateToken, async (req, res) => {
+  const { userid } = req.params;
+
+  if (!userid) {
+    return res.status(400).json({ error: 'Invalid request or missing parameters' });
+  }
+
+
+  try {
+
+    const folderPath = 'uploads';
+    deleteTempFiles(folderPath);
+  
+    const query = 'SELECT profilepic FROM "Users" WHERE userid = $1';
     const { rows } = await pool.query(query, [userid]);
 
     if (rows.length === 0) {
@@ -466,22 +496,25 @@ router.get('/api/GetUserDet', authenticateToken, async (req, res) => {
     }
 
     user = rows[0];
-    let picname = '/profilepic/emptyface.jpg';
-    if (user.picture != null) {
-      picname = user.picture;
-    }
+    const pictureData = user.profilepic;
 
-    const { contentType, data } =  await fetchPicture(picname);
-    res.set('Content-Type', contentType);
-    res.set('company', user.company);
-    res.set('salid', user.salid);
-    res.set('Fullname', user.fullname);
-    res.set('emailid', user.emailid);
-    res.set('isemailverified', user.isemailverified);
-    res.set('mobileno', user.mobileno);
-    res.set('ismobileverified', user.ismobileverified);
-    res.set('usertype', user.usertype);
-    res.status(200).send(data);
+    if (pictureData === null) {
+      return res.status(400).send('No profile picture available for the user.');
+    }
+    const picturePath = await savePicToUploads(userid, pictureData, "User");
+    if (picturePath === null) {
+      res.status(405).json({ error: 'Profile Picture not found' });
+    }
+    else
+    {
+      const picData = await getPicFromUploads(userid,"User");
+      if (picData === null) {
+        res.status(404).json({ error: 'Profile Picture not found' });
+      } else {
+        res.contentType('image/jpeg'); 
+        res.end(picData); 
+      }
+    }
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: 'Internal server error' });
@@ -545,18 +578,18 @@ router.put('/api/UpdateUserDet', upload.single('picture'),  authenticateToken, a
 
     const { emailid: savedEmail, mobileno: savedMobile, lastveremail, lastvermobile } = rows[0];
 
-    const extension = path.extname(req.file.originalname).toLowerCase();
+    const tempPath = req.file.path;
 
-    const pictureUrl = await savePicture(req.file, 'UP'+userid.toString()+extension);
+    const pictureData = await sharp(tempPath).resize(90, 90).toBuffer();
 
     // Update the user details
     const updateQuery = `
       UPDATE "Users"
-      SET salid = $1, fullname = $2, emailid = $3, mobileno = $4, picture = $5
+      SET salid = $1, fullname = $2, emailid = $3, mobileno = $4, profilepic = $5
       WHERE userid = $6
     `;
 
-    await pool.query(updateQuery, [salid, fullname, emailid, mobileno, pictureUrl, userid]);
+    await pool.query(updateQuery, [salid, fullname, emailid, mobileno, pictureData, userid]);
 
     // Check if the saved email matches the last verified email
     const emailverified = lastveremail === savedEmail;
@@ -741,14 +774,14 @@ router.post('/api/SaveUserRole', authenticateToken, async (req, res) => {
 
 /**
  * @swagger
- * /api/GetUserList:
+ * /api/GetUserList/{compid}:
  *   get:
- *     summary: Get users by compid from the Users table
+ *     summary: Get users (only Normal user list) by compid from the Users table
  *     tags: [Users]
  *     security:
  *       - basicAuth: []
  *     parameters:
- *       - in: query
+ *       - in: path
  *         name: compid
  *         schema:
  *           type: integer
@@ -762,16 +795,57 @@ router.post('/api/SaveUserRole', authenticateToken, async (req, res) => {
  *       500:
  *         description: Internal server error
  */
-router.get('/api/GetUserList', authenticateToken, async (req, res) => {
-  const { compid } = req.query;
+router.get('/api/GetUserList/:compid', authenticateToken, async (req, res) => {
+  const { compid } = req.params;
 
   if (!compid) {
     return res.status(400).json({ error: 'Invalid request or missing parameters' });
   }
 
   try {
-    const query = 'SELECT userid, username, emailid, mobileno FROM "Users" WHERE usertype = $1 AND compid = $2';
+    const query = 'SELECT userid, fullname, emailid, mobileno FROM "Users" WHERE usertype = $1 AND compid = $2';
     const { rows } = await pool.query(query, ['U', compid]);
+
+    return res.status(200).json(rows);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * @swagger
+ * /api/GetUserDetForHeader/{userid}:
+ *   get:
+ *     summary: Get users by userid to display in the header and set user permission
+ *     tags: [Users]
+ *     security:
+ *       - basicAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: userid
+ *         schema:
+ *           type: integer
+ *         required: true
+ *         description: User ID
+ *     responses:
+ *       200:
+ *         description: Returns the user details for the provided userid
+ *       400:
+ *         description: Invalid request or missing parameters
+ *       500:
+ *         description: Internal server error
+ */
+router.get('/api/GetUserDetForHeader/:userid', authenticateToken, async (req, res) => {
+  const { userid } = req.params;
+
+  if (!userid) {
+    return res.status(400).json({ error: 'Invalid request or missing parameters' });
+  }
+
+  try {
+    const query = 'SELECT userid, compid, fullname, usertype FROM "Users" WHERE userid = $1';
+    const { rows } = await pool.query(query, [userid]);
 
     return res.status(200).json(rows);
   } catch (err) {

@@ -1,27 +1,36 @@
 const express = require('express');
+const router = express.Router();
 const csvParser = require('csv-parser');
 const fs = require('fs');
 const pool = require('../db');
+const multer = require('multer');
+const path = require('path');
 const authenticateToken = require('../authMiddleware');
-const router = express.Router();
+
+const upload = multer({ dest: 'uploads/' });
 
 // Endpoint to save bulk countries from the CSV file
 /**
  * @swagger
  * /api/SaveBulkCountries:
- *   post:
+ *   put:
  *     summary: Save countries from a CSV file or update if already present
  *     tags: [Country]
  *     security:
  *       - BasicAuth: []
-*     consumes:
+ *     consumes:
  *       - multipart/form-data
- *     parameters:
- *       - name: csvFile
- *         in: formData
- *         description: CSV file containing multiple countries (countryname, defcurcode)
- *         required: true
- *         type: file
+ *     requestBody:
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               csvFile:
+ *                 type: string
+ *                 format: binary 
+ *                 description: CSV file containing multiple countries (countryname, defcurcode,isdcode) - all defcurcode should be in currency table
+ *                 required: true
  *     produces:
  *       - application/json
  *     responses:
@@ -30,14 +39,11 @@ const router = express.Router();
  *       500:
  *         description: Internal server error
  */
-router.post('/api/SaveBulkCountries', authenticateToken, (req, res) => {
-    if (!req.files || !req.files.csvFile) {
-      return res.status(400).json({ error: 'CSV file not provided' });
-    }
-  
+router.put('/api/SaveBulkCountries', upload.single('csvFile'), authenticateToken, (req, res) => {
+
     const countries = [];
   
-    const fileStream = req.files.csvFile.data;
+    const fileStream = req.file.path;
     fs.createReadStream(fileStream)
       .pipe(csvParser())
       .on('data', (row) => {
@@ -51,7 +57,7 @@ router.post('/api/SaveBulkCountries', authenticateToken, (req, res) => {
             res.status(200).json({ message: 'Countries saved or updated successfully' });
           })
           .catch((error) => {
-            console.error('Error saving or updating countries:', error);
+            console.log('Error saving or updating countries:', error);
             res.status(500).json({ error: 'Internal server error' });
           });
       });
@@ -60,25 +66,28 @@ router.post('/api/SaveBulkCountries', authenticateToken, (req, res) => {
   // Function to save or update countries in the database
   async function saveOrUpdateCountries(countries) {
     const client = await pool.connect();
-  
     try {
       await client.query('BEGIN');
   
       // Iterate through each country and insert or update in the database
       for (const country of countries) {
-        const countryName = country.countryname.trim().toLowerCase();
-        const existingCountry = await getCountryByName(client, countryName);
+        let countryName;
+        for(var i in country){
+          countryName = country[i];
+          break;
+        }
+        const existingCountry = await getCountryByName(client,countryName);
   
-        if (existingCountry) {
+        if (existingCountry.countryid > 0) {
           // If the country name is already present, update the existing record
-          const query = 'UPDATE public."Countries" SET defcurcode = $1 WHERE countryid = $2';
-          const values = [country.defcurcode, existingCountry.countryid];
+          const query = 'UPDATE "Country" SET defcurcode = $1, isdcode=$2 WHERE countryid = $3';
+          const values = [country.defcurcode, country.isdcode, existingCountry.countryid];
   
           await client.query(query, values);
         } else {
           // If the country name is not found, create a new country record
-          const query = 'INSERT INTO public."Countries" (countryname, defcurcode) VALUES ($1, $2)';
-          const values = [countryName, country.defcurcode];
+          const query = 'INSERT INTO "Country" (countryname, defcurcode, isdcode) VALUES ($1, $2, $3)';
+          const values = [countryName, country.defcurcode, country.isdcode];
   
           await client.query(query, values);
         }
@@ -86,6 +95,7 @@ router.post('/api/SaveBulkCountries', authenticateToken, (req, res) => {
   
       await client.query('COMMIT');
     } catch (error) {
+      console.log(error);
       await client.query('ROLLBACK');
       throw error;
     } finally {
@@ -97,19 +107,22 @@ router.post('/api/SaveBulkCountries', authenticateToken, (req, res) => {
 /**
  * @swagger
  * /api/SaveBulkStates:
- *   post:
+ *   put:
  *     summary: Save or update states from a CSV file
  *     tags: [State]
  *     security:
  *       - BasicAuth: []
- *     consumes:
- *       - multipart/form-data
- *     parameters:
- *       - name: csvFile
- *         in: formData
- *         description: CSV file containing multiple states (statename, countryname)
- *         required: true
- *         type: file
+ *     requestBody:
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               csvFile:
+ *                 type: string
+ *                 format: binary 
+ *                 description: CSV file containing multiple states (statename, countryname)- all countryname should be in country table
+ *                 required: true
  *     produces:
  *       - application/json
  *     responses:
@@ -118,14 +131,10 @@ router.post('/api/SaveBulkCountries', authenticateToken, (req, res) => {
  *       500:
  *         description: Internal server error
  */
-router.post('/api/SaveBulkStates', authenticateToken, (req, res) => {
-    if (!req.files || !req.files.csvFile) {
-      return res.status(400).json({ error: 'CSV file not provided' });
-    }
-  
+router.put('/api/SaveBulkStates', upload.single('csvFile'), authenticateToken, (req, res) => {
     const states = [];
   
-    const fileStream = req.files.csvFile.data;
+    const fileStream = req.file.path;
     fs.createReadStream(fileStream)
       .pipe(csvParser())
       .on('data', (row) => {
@@ -190,7 +199,8 @@ async function saveOrUpdateStates(states) {
       if (result.rows.length > 0) {
         return result.rows[0].countryid;
       } else {
-        throw new Error('Country not found');
+        //throw new Error('Country not found');
+        return {countryid : 0};
       }
     } catch (error) {
       throw error;
@@ -201,19 +211,22 @@ async function saveOrUpdateStates(states) {
 /**
  * @swagger
  * /api/SaveBulkBaseCur:
- *   post:
+ *   put:
  *     summary: Save or update base currencies from a CSV file
  *     tags: [Currency]
  *     security:
  *       - BasicAuth: []
- *     consumes:
- *       - multipart/form-data
- *     parameters:
- *       - name: csvFile
- *         in: formData
- *         description: CSV file containing multiple currencies (currencycode, symbol, currencyname, dec, format)
- *         required: true
- *         type: file
+ *     requestBody:
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               csvFile:
+ *                 type: string
+ *                 format: binary 
+ *                 description: CSV file containing multiple currencies (currencycode, symbol, currencyname, dec, format)
+ *                 required: true
  *     produces:
  *       - application/json
  *     responses:
@@ -222,14 +235,11 @@ async function saveOrUpdateStates(states) {
  *       500:
  *         description: Internal server error
  */
-router.post('/api/SaveBulkBaseCur', authenticateToken, (req, res) => {
-    if (!req.files || !req.files.csvFile) {
-      return res.status(400).json({ error: 'CSV file not provided' });
-    }
+router.put('/api/SaveBulkBaseCur', upload.single('csvFile'), authenticateToken, (req, res) => {
+
+  const currencies = [];
   
-    const currencies = [];
-  
-    const fileStream = req.files.csvFile.data;
+    const fileStream = req.file.path;
     fs.createReadStream(fileStream)
       .pipe(csvParser())
       .on('data', (row) => {
@@ -284,19 +294,22 @@ async function saveOrUpdateCurrencies(currencies) {
 /**
  * @swagger
  * /api/SaveBulkHSNCode:
- *   post:
+ *   put:
  *     summary: Save or update base HSN/SAC codes from a CSV file
  *     tags: [HSN Code]
  *     security:
  *       - BasicAuth: []
- *     consumes:
- *       - multipart/form-data
- *     parameters:
- *       - name: csvFile
- *         in: formData
- *         description: CSV file containing multiple HSN/SAC Codes (hsncode, codedesc, isselectable, isservice)
- *         required: true
- *         type: file
+ *     requestBody:
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               csvFile:
+ *                 type: string
+ *                 format: binary 
+ *                 description: CSV file containing multiple HSN/SAC Codes (hsncode, codedesc, isselectable, isservice)
+ *                 required: true
  *     produces:
  *       - application/json
  *     responses:
@@ -305,14 +318,11 @@ async function saveOrUpdateCurrencies(currencies) {
  *       500:
  *         description: Internal server error
  */
-router.post('/api/SaveBulkHSNCode', authenticateToken, (req, res) => {
-    if (!req.files || !req.files.csvFile) {
-      return res.status(400).json({ error: 'CSV file not provided' });
-    }
+router.put('/api/SaveBulkHSNCode', upload.single('csvFile'), authenticateToken, (req, res) => {
   
     const hsns = [];
   
-    const fileStream = req.files.csvFile.data;
+    const fileStream = req.file.path;
     fs.createReadStream(fileStream)
       .pipe(csvParser())
       .on('data', (row) => {
@@ -367,19 +377,22 @@ async function saveOrUpdateHSN(hsns) {
 /**
  * @swagger
  * /api/SaveBulkIndType:
- *   post:
+ *   put:
  *     summary: Save or update base HSN/SAC codes from a CSV file
  *     tags: [IndustryType]
  *     security:
  *       - BasicAuth: []
- *     consumes:
- *       - multipart/form-data
- *     parameters:
- *       - name: csvFile
- *         in: formData
- *         description: CSV file containing multiple Industry Types (indtype)
- *         required: true
- *         type: file
+ *     requestBody:
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               csvFile:
+ *                 type: string
+ *                 format: binary 
+ *                 description: CSV file containing multiple Industry Types (indtype)
+ *                 required: true
  *     produces:
  *       - application/json
  *     responses:
@@ -388,14 +401,11 @@ async function saveOrUpdateHSN(hsns) {
  *       500:
  *         description: Internal server error
  */
-router.post('/api/SaveBulkIndType', authenticateToken, (req, res) => {
-    if (!req.files || !req.files.csvFile) {
-      return res.status(400).json({ error: 'CSV file not provided' });
-    }
+router.put('/api/SaveBulkIndType', upload.single('csvFile'), authenticateToken, (req, res) => {
   
     const indtypes = [];
   
-    const fileStream = req.files.csvFile.data;
+    const fileStream = req.file.path;
     fs.createReadStream(fileStream)
       .pipe(csvParser())
       .on('data', (row) => {
@@ -450,19 +460,22 @@ async function saveOrUpdateIndType(indtypes) {
 /**
  * @swagger
  * /api/SaveBulkBusType:
- *   post:
+ *   put:
  *     summary: Save or update base Business Types from a CSV file
  *     tags: [BusinessType]
  *     security:
  *       - BasicAuth: []
- *     consumes:
- *       - multipart/form-data
- *     parameters:
- *       - name: csvFile
- *         in: formData
- *         description: CSV file containing multiple Business Types (bustype)
- *         required: true
- *         type: file
+ *     requestBody:
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               csvFile:
+ *                 type: string
+ *                 format: binary 
+ *                 description: CSV file containing multiple Business Types (bustype)
+ *                 required: true
  *     produces:
  *       - application/json
  *     responses:
@@ -471,14 +484,11 @@ async function saveOrUpdateIndType(indtypes) {
  *       500:
  *         description: Internal server error
  */
-router.post('/api/SaveBulkBusType', authenticateToken, (req, res) => {
-    if (!req.files || !req.files.csvFile) {
-      return res.status(400).json({ error: 'CSV file not provided' });
-    }
+router.put('/api/SaveBulkBusType', upload.single('csvFile'), authenticateToken, (req, res) => {
   
     const bustypes = [];
   
-    const fileStream = req.files.csvFile.data;
+    const fileStream = req.file.path;
     fs.createReadStream(fileStream)
       .pipe(csvParser())
       .on('data', (row) => {
@@ -533,19 +543,22 @@ async function saveOrUpdateBusType(bustypes) {
 /**
  * @swagger
  * /api/SaveBulkLang:
- *   post:
+ *   put:
  *     summary: Save or update base Languages from a CSV file
  *     tags: [Language]
  *     security:
  *       - BasicAuth: []
- *     consumes:
- *       - multipart/form-data
- *     parameters:
- *       - name: csvFile
- *         in: formData
- *         description: CSV file containing multiple Languages (langcode, language)
- *         required: true
- *         type: file
+ *     requestBody:
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               csvFile:
+ *                 type: string
+ *                 format: binary 
+ *                 description: CSV file containing multiple Languages (langcode, language)
+ *                 required: true
  *     produces:
  *       - application/json
  *     responses:
@@ -554,14 +567,11 @@ async function saveOrUpdateBusType(bustypes) {
  *       500:
  *         description: Internal server error
  */
-router.post('/api/SaveBulkLang', authenticateToken, (req, res) => {
-    if (!req.files || !req.files.csvFile) {
-      return res.status(400).json({ error: 'CSV file not provided' });
-    }
+router.put('/api/SaveBulkLang', upload.single('csvFile'), authenticateToken, (req, res) => {
   
     const languages = [];
   
-    const fileStream = req.files.csvFile.data;
+    const fileStream = req.file.path;
     fs.createReadStream(fileStream)
       .pipe(csvParser())
       .on('data', (row) => {
@@ -616,19 +626,22 @@ async function saveOrUpdateLangugae(languages) {
 /**
  * @swagger
  * /api/SaveBulkGSTTreat:
- *   post:
+ *   put:
  *     summary: Save or update GST Treatments from a CSV file
  *     tags: [GST Treatment]
  *     security:
  *       - BasicAuth: []
- *     consumes:
- *       - multipart/form-data
- *     parameters:
- *       - name: csvFile
- *         in: formData
- *         description: CSV file containing multiple GST Treatments (gsttreatment, reqgstno, reqsupplace)
- *         required: true
- *         type: file
+ *     requestBody:
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               csvFile:
+ *                 type: string
+ *                 format: binary 
+ *                 description: CSV file containing multiple GST Treatments (gsttreatment, reqgstno, reqsupplace)
+ *                 required: true
  *     produces:
  *       - application/json
  *     responses:
@@ -637,14 +650,11 @@ async function saveOrUpdateLangugae(languages) {
  *       500:
  *         description: Internal server error
  */
-router.post('/api/SaveBulkGSTTreat', authenticateToken, (req, res) => {
-    if (!req.files || !req.files.csvFile) {
-      return res.status(400).json({ error: 'CSV file not provided' });
-    }
+router.put('/api/SaveBulkGSTTreat', upload.single('csvFile'), authenticateToken, (req, res) => {
   
     const gsttreats = [];
   
-    const fileStream = req.files.csvFile.data;
+    const fileStream = req.file.path;
     fs.createReadStream(fileStream)
       .pipe(csvParser())
       .on('data', (row) => {
@@ -676,7 +686,7 @@ async function saveOrUpdateGSTTreat(gsttreats) {
           [gsttreatment]
         );
   
-        if (existingLang.rows.length > 0) {
+        if (existingGSTTreat.rows.length > 0) {
           // Update the existing GST Treatment
           await pool.query(
             'UPDATE "GSTTreatment" SET reqgstno = $2, reqsupplace=$3 WHERE LOWER(gsttreatment) = LOWER($1)',
